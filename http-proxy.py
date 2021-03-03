@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-# add import statements here
 import argparse
 import datetime
 import socket
@@ -8,18 +7,14 @@ from urllib.parse import urlparse
 from enum import Enum, auto
 
 
-# define classes, enums, etc here
-
 # Enumeration to represent message types
 class MessageType(Enum):
     REQUEST = auto()  # constant values are auto-assigned
     RESPONSE = auto()  # constant values are auto-assigned
 
 
-# define functions here
-
 def build_message(message):
-    # Please note that we are replacing the original version (this is intentional)
+    # replacing the original version (this is intentional)
     data = ''
     if message['type'] is MessageType.REQUEST:
         message_header = '{} {} {}\r\n'.format(message['method'], message['uri'], 'HTTP/1.0')
@@ -27,7 +22,7 @@ def build_message(message):
         message_header = '{} {} {}\r\n'.format(message['version'], message['status-code'], message['status-text'])
     data = data + message_header
     for header in message['headers']:
-        data = data + '{}\r\n'.format(header['name'] + ": " + header['value'])  # Format each header properly
+        data = data + '{}: {}\r\n'.format(header['name'], header['value'])  # Format each header properly
     data = data + '\r\n'
     req = data.encode('iso-8859-1')
     if len(message['body']) > 0:
@@ -58,6 +53,7 @@ def parse_uri(uri):
     return host, port
 
 
+# returns header in dict format
 def get_header_response(data):
     params = data.split(":", 1)
     if len(params) != 2:
@@ -81,9 +77,16 @@ def parse_line(data, encoding='iso-8859-1'):
     return fin_line, fields[2]
 
 
+# returns a dictionary representation of full message
+# returns none if the message is not complete
 def parse_message(data, message_type):
-    message = {}
-    headerz = []
+    message = {
+        'Content-Length': 0,
+        'Referer': "-",
+        'User-Agent': "-",
+        'body': b''
+    }
+    headers = []
     try:
         line, unparsed = parse_line(data)
         req = line.split(' ', 2)
@@ -98,22 +101,18 @@ def parse_message(data, message_type):
             message['version'] = req[0]
             message['status-code'] = req[1]
             message['status-text'] = req[2]
-        message['Content-Length'] = 0
-        message['Referer'] = "- "
-        message['User-Agent'] = "-"
-        message['body'] = b''
         line, unparsed = parse_line(unparsed)
         while line != '':
             if line is None:
                 raise Exception
-            if len(headerz) > 0 and (line.startswith(" ") or line.startswith("\t")):
-                last_header = headerz[len(headerz) - 1]
+            if len(headers) > 0 and (line.startswith(" ") or line.startswith("\t")):
+                last_header = headers[len(headers) - 1]
                 last_header['value'] = last_header['value'] + line
             else:
                 header = get_header_response(line)
                 if header is None:
                     raise Exception
-                headerz.append(header)
+                headers.append(header)
                 if header['name'] == 'Content-Length':
                     message['Content-Length'] = int(header['value'])
                 if header['name'] == 'Referer':
@@ -130,14 +129,15 @@ def parse_message(data, message_type):
                 message['body'] = unparsed
             else:
                 message['body'] = unparsed
-        message['headers'] = headerz
+        message['headers'] = headers
         return message, unparsed
     except:
         return None, data
 
 
+# establishes the connection and appends entire request to buffer
+# returns
 def get_response(host, port, req):
-    print("enter")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.connect((host, port))
@@ -152,8 +152,7 @@ def get_response(host, port, req):
             buffer = buffer + data
             message, unparsed = parse_message(buffer, MessageType.RESPONSE)
             if message is not None:
-                built = build_message(message)
-                return built, message
+                return build_message(message), message
 
 
 def main():
@@ -186,19 +185,17 @@ def main():
             buffer = buffer + data
             message, unparsed = parse_message(buffer, MessageType.REQUEST)
             if message is not None:
-                destHost, destPort = parse_uri(message['uri'])
+                dest_host, dest_port = parse_uri(message['uri'])
                 req = build_message(message)
-                response, m_resp = get_response(destHost, destPort, req)
+                response, m_resp = get_response(dest_host, dest_port, req)
                 conn.sendall(response)
-                reqHost = addr[0] + " "
+                req_host = addr[0]
                 now = datetime.datetime.now()
-                timeStamp = now.strftime('%d/%b/%Y:%H:%M:%S') + " "
-                message_header = '\"{} {} {}\" '.format(message['method'], message['uri'], message['version'])
-                respCode = str(m_resp['status-code']) + " "
-                respLength = str(m_resp['Content-Length']) + " "
-                referer = message['Referer']
-                agent = message['User-Agent']
-                print(reqHost + timeStamp + message_header + respCode + respLength + referer + agent)
+                time_stamp = now.strftime('%d/%b/%Y:%H:%M:%S')
+                message_header = '\"{} {} {}\"'.format(message['method'], message['uri'], message['version'])
+                print("{} {} {} {} {} {} {}\r\n".format(req_host, time_stamp, message_header,
+                                                        m_resp['status-code'], m_resp['Content-Length'],
+                                                        message['Referer'], message['User-Agent']))
                 break
 
 
